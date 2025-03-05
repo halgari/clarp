@@ -3,6 +3,12 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Clarp", "Clarp\Clarp.csproj", "{89F24F51-3036-4803-812E-15AC6980D2E4}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Clarp.Tests", "Clarp.Tests\Clarp.Tests.csproj", "{E3E8EF05-3E75-44A6-B542-0CFCBEF269EE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Clarp.Benchmarks", "Clarp.Benchmarks\Clarp.Benchmarks.csproj", "{3E295609-72B0-459D-B2E0-1E751ED33BD9}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -10,5 +16,19 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{89F24F51-3036-4803-812E-15AC6980D2E4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{89F24F51-3036-4803-812E-15AC6980D2E4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{89F24F51-3036-4803-812E-15AC6980D2E4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{89F24F51-3036-4803-812E-15AC6980D2E4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E3E8EF05-3E75-44A6-B542-0CFCBEF269EE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E3E8EF05-3E75-44A6-B542-0CFCBEF269EE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E3E8EF05-3E75-44A6-B542-0CFCBEF269EE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E3E8EF05-3E75-44A6-B542-0CFCBEF269EE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3E295609-72B0-459D-B2E0-1E751ED33BD9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3E295609-72B0-459D-B2E0-1E751ED33BD9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3E295609-72B0-459D-B2E0-1E751ED33BD9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3E295609-72B0-459D-B2E0-1E751ED33BD9}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
