@@ -32,6 +32,8 @@ public class PersistentVector<T>
         }
     }
     
+    public int Count => _count;
+    
     public object[] ArrayFor(int i)
     {
         if (i >= 0 && i < _count)

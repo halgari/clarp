@@ -14,10 +14,8 @@ public class PersistentVector
         {
             vector = vector.Cons(i);
         }
-
-        var plist = Enumerable.Range(0, 100).ToImmutableList();
-
-        Assert.Fail("ble");
+        
+        await Assert.That(vector.Count).IsEqualTo(100);
     }
 
     [Test]
