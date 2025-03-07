@@ -1,4 +1,5 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Clarp.Utils;
 
@@ -16,7 +17,7 @@ public sealed class PersistentVector<T>
     /// The branching factor of the tree, 32 in almost all cases (Clojure for example)
     /// </summary>
     // ReSharper disable once InconsistentNaming
-    private const int BRANCH_FACTOR = 1 << SHIFT;
+    public const int BRANCH_FACTOR = 1 << SHIFT;
     
     /// <summary>
     /// The mask for the first SHIFT bits
@@ -87,7 +88,7 @@ public sealed class PersistentVector<T>
             var node = _root;
             for (var level = _shift; level > 0; level -= SHIFT)
             {
-                node = ((Node)node)._array[(i >> level) & MASK];
+                node = ((Node)node)[(i >> level) & MASK];
             }
 
             return ((ValueNode)node).GetReadOnlySpan();
@@ -110,9 +111,7 @@ public sealed class PersistentVector<T>
         
         if ((_count >> 5) > (1 << _shift))
         {
-            newroot = new Node(_root.Edit);
-            newroot._array[0] = _root;
-            newroot._array[1] = PushTail(_shift, newroot, tailNode);
+            newroot = new Node(_root.Edit, _root, NewPath(_root.Edit, _shift, tailNode));
             newshift += 5;
         }
         else
@@ -123,17 +122,37 @@ public sealed class PersistentVector<T>
         return new PersistentVector<T>(_count + 1, newshift, newroot, val);
     }
 
+    private static INode NewPath(AtomicReference<Thread> edit, int level, INode node)
+    {
+        if (level == 0)
+            return node;
+        return new Node(edit, NewPath(edit, level - SHIFT, node));
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     internal ReadOnlySpan<T> GetReadOnlySpan() 
         => MemoryMarshal.CreateReadOnlySpan(ref Unsafe.AsRef(ref _tail[0]), BRANCH_FACTOR);
     
 
-    private Node PushTail(int level, Node parent, INode tailNode)
+    private Node PushTail(int level, Node parent, ValueNode tailNode)
     {
-        var subidx = ((_count - 1) >> level) & MASK;
-        var nodeToInsert = level == SHIFT ? tailNode : PushTail(level - SHIFT, (Node) parent._array[subidx], tailNode);
-        return parent.WithNode(subidx, nodeToInsert);
-
+        var subIdx = ((_count - 1) >> level) & MASK;
+        INode nodeToInsert;
+        if(level == 5)
+        {
+            nodeToInsert = tailNode;
+        }
+        else
+        {
+            Node child = (Node) parent[subIdx];
+            nodeToInsert = (child != null)?
+                PushTail(level-5,child, tailNode)
+                :NewPath(_root.Edit,level-5, tailNode);
+        }
+        
+        Node ret = new Node(parent, subIdx, nodeToInsert );
+        return ret;
+            
     }
     
     public T this[int size]
@@ -188,7 +207,7 @@ public sealed class PersistentVector<T>
     private class Node : INode
     {
         public AtomicReference<Thread> Edit { get; }
-        public InlineNodes _array;
+        private InlineNodes _array;
         
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
         private ReadOnlySpan<INode> GetReadOnlySpan() 
@@ -202,7 +221,7 @@ public sealed class PersistentVector<T>
             Edit = edit;
         }
 
-        private Node(Node other, int subidx, INode nodeToInsert)
+        internal Node(Node other, int subidx, INode nodeToInsert)
         {
             Edit = other.Edit;
             var selfSpan = GetSpan();
@@ -210,11 +229,33 @@ public sealed class PersistentVector<T>
             selfSpan[subidx] = nodeToInsert;
         }
 
+        public Node(AtomicReference<Thread> edit, INode slot0)
+        {
+            Edit = edit;
+            _array[0] = slot0;
+        }
+        
+        public Node(AtomicReference<Thread> edit, INode slot0, INode slot1)
+        {
+            Edit = edit;
+            _array[0] = slot0;
+            _array[1] = slot1;
+        }
+        
         /// <summary>
         /// Returns a new node with the given node inserted at the given subindex
         /// </summary>
         public Node WithNode(int subidx, INode nodeToInsert) => 
             new(this, subidx, nodeToInsert);
+
+        public INode this[int idx]
+        {
+            get
+            {
+                Debug.Assert(idx is >= 0 and < BRANCH_FACTOR, "Index out of bounds");
+                return _array[idx];
+            }
+        }
     }
 
 
