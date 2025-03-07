@@ -42,6 +42,72 @@ public interface ISeq<T> : IEnumerable<T>
     {
         return GetEnumerator();
     }
+    
+    public void Deconstruct(out T first, out ISeq<T> rest)
+    {
+        first = First;
+        rest = Next();
+    }
+    
+    public void Deconstruct(out T first, out T second, out ISeq<T> rest)
+    {
+        first = First;
+        rest = Next();
+        second = rest.First;
+        rest = rest.Next();
+    }
+    
+    public void Deconstruct(out T first, out T second, out T third, out ISeq<T> rest)
+    {
+        first = First;
+        rest = Next();
+        second = rest.First;
+        rest = rest.Next();
+        third = rest.First;
+        rest = rest.Next();
+    }
+    
+    public void Deconstruct(out T first, out T second, out T third, out T fourth, out ISeq<T> rest)
+    {
+        first = First;
+        rest = Next();
+        second = rest.First;
+        rest = rest.Next();
+        third = rest.First;
+        rest = rest.Next();
+        fourth = rest.First;
+        rest = rest.Next();
+    }
+    
+    public void Deconstruct(out T first, out T second, out T third, out T fourth, out T fifth, out ISeq<T> rest)
+    {
+        first = First;
+        rest = Next();
+        second = rest.First;
+        rest = rest.Next();
+        third = rest.First;
+        rest = rest.Next();
+        fourth = rest.First;
+        rest = rest.Next();
+        fifth = rest.First;
+        rest = rest.Next();
+    }
+    
+    public void Deconstruct(out T first, out T second, out T third, out T fourth, out T fifth, out T sixth, out ISeq<T> rest)
+    {
+        first = First;
+        rest = Next();
+        second = rest.First;
+        rest = rest.Next();
+        third = rest.First;
+        rest = rest.Next();
+        fourth = rest.First;
+        rest = rest.Next();
+        fifth = rest.First;
+        rest = rest.Next();
+        sixth = rest.First;
+        rest = rest.Next();
+    }
 }
 
 

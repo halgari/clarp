@@ -3,12 +3,12 @@ using Clarp.Abstractions;
 
 namespace Clarp.Collections;
 
-public sealed record EmptyList<T> : IImmutableList<T>
+public sealed record EmptyList<T> : IPersistentList<T>
 {
     public static readonly EmptyList<T> Instance = new();
     
     public T First => throw new InvalidOperationException("Empty list has no first element");
-    IImmutableList<T> IImmutableList<T>.Next()
+    IPersistentList<T> IPersistentList<T>.Next()
     {
         throw new NotImplementedException();
     }

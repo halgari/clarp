@@ -1,13 +1,12 @@
-﻿using System.Collections;
-using Clarp.Abstractions;
+﻿using Clarp.Abstractions;
 
 namespace Clarp.Collections;
 
-public sealed record ImmutableList<T> : IImmutableList<T>
+public sealed record PersistentList<T> : IPersistentList<T>
 {
-    private readonly IImmutableList<T> _next;
+    private readonly IPersistentList<T> _next;
 
-    internal ImmutableList(int count, T first, IImmutableList<T> next)
+    internal PersistentList(int count, T first, IPersistentList<T> next)
     {
         Count = count;
         First = first;
@@ -15,7 +14,7 @@ public sealed record ImmutableList<T> : IImmutableList<T>
     }
     
     public T First { get; }
-    IImmutableList<T> IImmutableList<T>.Next() => _next;
+    IPersistentList<T> IPersistentList<T>.Next() => _next;
 
     public ISeq<T> Next() => _next;
     public int Count { get; }
@@ -29,7 +28,7 @@ public sealed record ImmutableList<T> : IImmutableList<T>
                 throw new IndexOutOfRangeException();
             }
 
-            IImmutableList<T> current = this;
+            IPersistentList<T> current = this;
             for (var i = 0; i < index; i++)
             {
                 current = current.Next();

@@ -6,7 +6,7 @@ namespace Clarp.Abstractions;
 /// A immutable list is much like a ISeq, but the length is finite and known. It is immutable,
 /// and is itself a seq
 /// </summary>
-public interface IImmutableList<T> : ISeq<T>, IReadOnlyList<T>
+public interface IPersistentList<T> : ISeq<T>, IReadOnlyList<T>
 {
     /// <summary>
     /// Get the count of elements in the list.
@@ -16,14 +16,14 @@ public interface IImmutableList<T> : ISeq<T>, IReadOnlyList<T>
     /// <summary>
     /// A typed version of Next, which returns a list
     /// </summary>
-    public new IImmutableList<T> Next();
+    public new IPersistentList<T> Next();
 
     /// <summary>
     /// Returns a new list with the given value added to the start;
     /// </summary>
-    public ImmutableList<T> Add(T value)
+    public PersistentList<T> Add(T value)
     {
-        return new ImmutableList<T>(Count + 1, value, this);
+        return new PersistentList<T>(Count + 1, value, this);
     }
     
     /// <summary>

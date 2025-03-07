@@ -9,19 +9,19 @@ public class ImmutableListBenchmarks
 {
     private List<int> _mutableList;
     private System.Collections.Immutable.ImmutableList<int> _msImmutableList;
-    private IImmutableList<int> _clarpImmutableList;
+    private IPersistentList<int> _clarpPersistentList;
 
     [GlobalSetup]
     public void GlobalSetup()
     {
         _mutableList = [];
         _msImmutableList = System.Collections.Immutable.ImmutableList<int>.Empty;
-        _clarpImmutableList = EmptyList<int>.Instance;
+        _clarpPersistentList = EmptyList<int>.Instance;
         for (var i = 0; i < Size; i++)
         {
             _mutableList.Add(i);
             _msImmutableList = _msImmutableList.Add(i);
-            _clarpImmutableList = _clarpImmutableList.Add(i);
+            _clarpPersistentList = _clarpPersistentList.Add(i);
         }
         
     }
@@ -29,6 +29,7 @@ public class ImmutableListBenchmarks
     [Params(1, 100, 1000, 10000)]
     public int Size { get; set; }
     
+    /*
     [Benchmark]
     public long IterationMutableList()
     {
@@ -60,5 +61,18 @@ public class ImmutableListBenchmarks
             sum += i;
         }
         return sum;
+    }
+    */
+
+    [Benchmark]
+    public System.Collections.Immutable.ImmutableList<int> AddItemMSImmutableList()
+    {
+        return _msImmutableList.Add(Size);
+    }
+    
+    [Benchmark]
+    public IPersistentList<int> AddItemClarpImmutableList()
+    {
+        return _clarpPersistentList.Add(Size);
     }
 }
