@@ -6,10 +6,10 @@ public class PersistentVector<T>
 {
     private int _count;
     private readonly int _shift;
-    private readonly Node _root;
-    private readonly object[] _tail;
+    private readonly INode _root;
+    private readonly T[] _tail;
 
-    private PersistentVector(int count, int shift, Node root, object[] tail)
+    private PersistentVector(int count, int shift, INode root, T[] tail)
     {
         _shift = shift;
         _count = count;
@@ -34,18 +34,19 @@ public class PersistentVector<T>
     
     public int Count => _count;
     
-    public object[] ArrayFor(int i)
+    public T[] ArrayFor(int i)
     {
         if (i >= 0 && i < _count)
         {
             if (i >= TailOff)
                 return _tail;
-            var node = _root;
+            INode node = _root;
             for (var level = _shift; level > 0; level -= 5)
             {
-                node = (Node) node._array[(i >> level) & 0x01f];
+                node = ((Node) node)._array[(i >> level) & 0x01f];
             }
-            return node._array;
+
+            return ((ValueNode)node)._values;
         }
         throw new IndexOutOfRangeException();
     }
@@ -54,55 +55,73 @@ public class PersistentVector<T>
     {
         if (_count - TailOff < 32)
         {
-            var newTail = GC.AllocateUninitializedArray<object>(_tail.Length + 1);
+            var newTail = GC.AllocateUninitializedArray<T>(_tail.Length + 1);
             _tail.CopyTo(newTail, 0);
             newTail[_tail.Length] = val;
             return new PersistentVector<T>(_count + 1, _shift, _root, newTail);
         }
         
         Node newroot;
-        var tailNode = new Node(_root._edit, _tail);
+        var tailNode = new ValueNode(_root.Edit, _tail);
         var newshift = _shift;
         
         if ((_count >> 5) > (1 << _shift))
         {
-            newroot = new Node(_root._edit);
+            newroot = new Node(_root.Edit);
             newroot._array[0] = _root;
             newroot._array[1] = PushTail(_shift, newroot, tailNode);
             newshift += 5;
         }
         else
         {
-            newroot = PushTail(_shift, _root, tailNode);
+            newroot = PushTail(_shift, (Node)_root, tailNode);
         }
         
-        return new PersistentVector<T>(_count + 1, newshift, newroot, new [] {(object)val});
+        return new PersistentVector<T>(_count + 1, newshift, newroot, [val]);
     }
     
-    private Node PushTail(int level, Node parent, Node tailNode)
+    private Node PushTail(int level, Node parent, INode tailNode)
     {
         var subidx = ((_count - 1) >> level) & 0x01f;
-        var newParent = new Node(parent._edit, parent._array);
+        var newParent = new Node(parent.Edit, parent._array);
         var nodeToInsert = level == 5 ? tailNode : PushTail(level - 5, (Node) parent._array[subidx], tailNode);
         newParent._array[subidx] = nodeToInsert;
         return newParent;
+
     }
     
-    private class Node
+    public interface INode
     {
-        public AtomicReference<Thread> _edit;
-        public object[] _array;
-        
-        public Node(AtomicReference<Thread> edit, object[] array)
+        public AtomicReference<Thread> Edit { get; }
+    }
+    
+    private class ValueNode : INode
+    {
+        public AtomicReference<Thread> Edit { get; }
+        public T[] _values;
+
+        public ValueNode(AtomicReference<Thread> edit, T[] values)
         {
-            _edit = edit;
+            Edit = edit;
+            _values = values;
+        }
+    }
+    
+    private class Node : INode
+    {
+        public AtomicReference<Thread> Edit { get; }
+        public INode[] _array;
+        
+        public Node(AtomicReference<Thread> edit, INode[] array)
+        {
+            Edit = edit;
             _array = array;
         }
 
         public Node(AtomicReference<Thread> edit)
         {
-            _edit = edit;
-            _array = GC.AllocateUninitializedArray<object>(32);
+            Edit = edit;
+            _array = GC.AllocateUninitializedArray<INode>(32);
         }
 
     }
