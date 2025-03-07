@@ -5,7 +5,7 @@ using Clarp.Collections;
 namespace Clarp.Benchmarks.Collections;
 
 [MemoryDiagnoser]
-public class ImmutableListBenchmarks
+public class PersistentListBenchmarks
 {
     private List<int> _mutableList;
     private System.Collections.Immutable.ImmutableList<int> _msImmutableList;
@@ -40,7 +40,7 @@ public class ImmutableListBenchmarks
         }
         return sum;
     }
-    
+
     [Benchmark]
     public long IterationMSImmutableList()
     {
@@ -51,7 +51,7 @@ public class ImmutableListBenchmarks
         }
         return sum;
     }
-    
+
     [Benchmark]
     public long IterationClarpImmutableList()
     {

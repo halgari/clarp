@@ -3,4 +3,4 @@
 using BenchmarkDotNet.Running;
 using Clarp.Benchmarks.Collections;
 
-BenchmarkRunner.Run<ImmutableListBenchmarks>();
+BenchmarkRunner.Run<PersistentVectorBenchmarks>();
