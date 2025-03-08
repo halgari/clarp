@@ -61,6 +61,23 @@ public sealed class PersistentVector<T>
         _tail[addedPosition] = tailAddition;
     }
 
+    private PersistentVector(int count, int shift, INode root, in InlinedValues tail, int tailPos, T tailValue)
+    {
+        _count = count;
+        _shift = shift;
+        _root = root;
+        _tail = tail;
+        _tail[tailPos] = tailValue;
+    }
+
+    private PersistentVector(PersistentVector<T> baseVector, INode newRoot)
+    {
+        _count = baseVector._count;
+        _shift = baseVector._shift;
+        _root = newRoot;
+        _tail = baseVector._tail;
+    }
+
     private static readonly AtomicReference<Thread> NOEDIT = new(null!);
     private static readonly Node EMPTY_NODE = new(NOEDIT);
 
@@ -120,6 +137,38 @@ public sealed class PersistentVector<T>
         }
         
         return new PersistentVector<T>(_count + 1, newshift, newroot, val);
+    }
+
+    public PersistentVector<T> AssocN(int i, T val)
+    {
+        if (i >= 0 && i < _count)
+        {
+            if (i >= TailOff)
+            {
+                var newTail = _tail;
+                newTail[i & MASK] = val;
+                return new PersistentVector<T>(_count, _shift, _root, newTail, i & MASK, val);
+            }
+
+            return new PersistentVector<T>(this, DoAssoc(_shift, _root, i, val));
+        }
+        if (i == _count)
+            return Cons(val);
+        throw new IndexOutOfRangeException();
+    }
+
+    private static INode DoAssoc(int level, INode node, int i, T val)
+    {
+        if (level == 0)
+        {
+            return new ValueNode((ValueNode)node, i & MASK, val);
+        }
+        else
+        {
+            var subidx = (i >> level) & MASK;
+            var newSubNode = DoAssoc(level - SHIFT, ((Node)node)[subidx], i, val);
+            return new Node((Node)node, subidx, newSubNode);
+        }
     }
 
     private static INode NewPath(AtomicReference<Thread> edit, int level, INode node)
@@ -186,6 +235,14 @@ public sealed class PersistentVector<T>
             values.CopyTo(GetSpan());
         }
 
+        public ValueNode(ValueNode node, int values, T val)
+        {
+            Edit = node.Edit;
+            var selfSpan = GetSpan();
+            node.GetReadOnlySpan().CopyTo(selfSpan);
+            selfSpan[values] = val;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
         internal ReadOnlySpan<T> GetReadOnlySpan() 
             => MemoryMarshal.CreateReadOnlySpan(ref Unsafe.AsRef(ref _values[0]), BRANCH_FACTOR);
@@ -242,12 +299,6 @@ public sealed class PersistentVector<T>
             _array[1] = slot1;
         }
         
-        /// <summary>
-        /// Returns a new node with the given node inserted at the given subindex
-        /// </summary>
-        public Node WithNode(int subidx, INode nodeToInsert) => 
-            new(this, subidx, nodeToInsert);
-
         public INode this[int idx]
         {
             get

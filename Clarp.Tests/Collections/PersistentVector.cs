@@ -24,9 +24,20 @@ public class PersistentVector
     public async Task CanIndexVectors()
     {
         var vector = Enumerable.Range(0, MAX_SIZE).ToPersistentVector();
-        for (int i = 0; i < MAX_SIZE; i++)
+        for (var i = 0; i < MAX_SIZE; i++)
         {
             await Assert.That(vector[i]).IsEqualTo(i);
+        }
+    }
+
+    [Test]
+    public async Task CanUpdateVectors()
+    {
+        var vector = Enumerable.Range(0, MAX_SIZE).ToPersistentVector();
+        for (var i = 0; i < MAX_SIZE; i++)
+        {
+            vector = vector.AssocN(i, -i);
+            await Assert.That(vector[i]).IsEqualTo(-i);
         }
     }
 }
