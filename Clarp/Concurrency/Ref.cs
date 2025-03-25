@@ -64,9 +64,9 @@ public class Ref<T> : IGenericRef
             this.val = val;
             this.point = point;
             this.prior = prior;
-            next = this.prior.next;
-            prior.next = this;
-            next!.prior = this;
+            next = prior.next;
+            this.prior.next = this;
+            this.next!.prior = this;
         }
 
         public TVal(T? val, long point)

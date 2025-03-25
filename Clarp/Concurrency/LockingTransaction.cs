@@ -4,9 +4,9 @@ namespace Clarp.Concurrency;
 
 public class LockingTransaction
 {
-    public const int RETRY_LIMIT = 10000;
+    public const int RETRY_LIMIT = 4;
     public const int LOCK_WAIT_MSECS = 100;
-    public const long BARGE_WAIT_NANOS = 10 * 1000000;
+    public const long BARGE_WAIT_TICKS = 10 * 1000000;
 
     internal static RetryEx RETRY_EX = new();
 
@@ -110,7 +110,7 @@ public class LockingTransaction
         throw new AbortException();
     }
 
-    private bool BargeTimeElapsed => (DateTime.Now.Ticks - _startTime) > BARGE_WAIT_NANOS;
+    private bool BargeTimeElapsed => (Environment.TickCount64 - _startTime) > BARGE_WAIT_TICKS;
 
     private bool Barge(Info refInfo)
     {
@@ -139,7 +139,7 @@ public class LockingTransaction
             var refInfo = r.TransactionInfo;
 
             // write lock conflict
-            if (refInfo != null && refInfo != _info && refInfo.Running)
+            if (refInfo != null && !ReferenceEquals(_info, refInfo) && refInfo.Running)
             {
                 if (!Barge(refInfo))
                 {
@@ -183,15 +183,15 @@ public class LockingTransaction
         List<IGenericRef> locked = [];
         List<Notify> notify = [];
 
-        for (var i = 0; i < RETRY_LIMIT; i++)
+        for (var retryCount = 0; !done && retryCount < RETRY_LIMIT; retryCount++)
         {
             try
             {
                 GetReadPoint();
-                if (i == 0)
+                if (retryCount == 0)
                 {
                     _startPoint = _readPoint;
-                    _startTime = DateTime.Now.Ticks;
+                    _startTime = Environment.TickCount64;
                 }
 
                 _info = new Info(State.RUNNING, _startPoint);
