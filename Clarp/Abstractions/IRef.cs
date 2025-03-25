@@ -6,7 +6,7 @@ public interface IRef<T> : IDeref<T>
 {
     public delegate bool ValidatorFn(in T value);
     
-    public delegate void WatchFn(object key, IRef<T> reference, in T oldValue, in T newValue);
+    public delegate void WatchFn(object key, IRef<T> reference, T oldValue, T newValue);
     
     /// <summary>
     /// Get or set the validator for the reference.
