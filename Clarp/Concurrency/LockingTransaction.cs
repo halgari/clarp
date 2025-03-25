@@ -8,7 +8,7 @@ public class LockingTransaction
     public const int LOCK_WAIT_MSECS = 100;
     public const long BARGE_WAIT_NANOS = 10 * 1000000;
 
-    private static RetryEx RETRY_EX = new();
+    internal static RetryEx RETRY_EX = new();
 
     public enum State : int
     {
@@ -29,15 +29,15 @@ public class LockingTransaction
     private long _startPoint;
     private long _startTime;
 
-    private Dictionary<Ref, object?> _vals = new();
-    private HashSet<Ref> _sets = new();
-    private SortedDictionary<Ref, List<object>> _commutes = new();
-    private readonly HashSet<Ref> _ensures = [];
+    private Dictionary<IGenericRef, object?> _vals = new();
+    private HashSet<IGenericRef> _sets = new();
+    private readonly SortedDictionary<IGenericRef, List<object>> _commutes = new();
+    private readonly HashSet<IGenericRef> _ensures = [];
 
     #endregion
 
 
-    class RetryEx : Exception;
+    internal class RetryEx : Exception;
 
     class AbortException : Exception;
 
@@ -82,11 +82,11 @@ public class LockingTransaction
         _commutes.Clear();
     }
 
-    void TryWriteLock(Ref r)
+    void TryWriteLock(IGenericRef r)
     {
         try
         {
-            if (!r.Lock.TryEnterWriteLock(LOCK_WAIT_MSECS))
+            if (!r.TryEnterWriteLock(LOCK_WAIT_MSECS))
                 throw RETRY_EX;
         }
         catch (ThreadInterruptedException)
@@ -95,13 +95,13 @@ public class LockingTransaction
         }
     }
 
-    private void ReleaseIfEnsured(Ref r)
+    private void ReleaseIfEnsured(IGenericRef r)
     {
         if (!_ensures.Contains(r))
             return;
 
         _ensures.Remove(r);
-        r.Lock.ExitReadLock();
+        r.ExitReadLock();
     }
 
     private void Abort()
@@ -124,7 +124,7 @@ public class LockingTransaction
         return barged;
     }
 
-    object? Lock(Ref r)
+    void Lock(IGenericRef r)
     {
         ReleaseIfEnsured(r);
         var unlocked = true;
@@ -133,29 +133,31 @@ public class LockingTransaction
             TryWriteLock(r);
             unlocked = false;
 
-            if (r.tvals != null && r.tvals.point > _readPoint)
+            if (r.TValsOverPoint(_readPoint))
                 throw RETRY_EX;
 
-            var refInfo = r.tinfo;
+            var refInfo = r.TransactionInfo;
 
             // write lock conflict
             if (refInfo != null && refInfo != _info && refInfo.Running)
             {
                 if (!Barge(refInfo))
                 {
-                    r.Lock.ExitWriteLock();
+                    r.ExitWriteLock();
                     unlocked = true;
-                    return BlockAndBail(refInfo);
+                    BlockAndBail(refInfo!);
+                    return;
                 }
             }
 
-            r.tinfo = _info!;
-            return r.tvals?.val;
+            r.TransactionInfo = _info!;
+            return;
+            //return r.tvals?.val;
         }
         finally
         {
             if (!unlocked)
-                r.Lock.ExitWriteLock();
+                r.ExitWriteLock();
         }
     }
 
@@ -178,7 +180,7 @@ public class LockingTransaction
         bool done = false;
         T ret = default!;
 
-        List<Ref> locked = [];
+        List<IGenericRef> locked = [];
         List<Notify> notify = [];
 
         for (var i = 0; i < RETRY_LIMIT; i++)
@@ -200,7 +202,7 @@ public class LockingTransaction
                     (int)State.RUNNING)
                 {
                     // Handle commutes
-                    foreach (var (r, eVal) in _commutes)
+                    foreach (var (r, commutes) in _commutes)
                     {
                         if (_sets.Contains(r))
                             continue;
@@ -210,24 +212,27 @@ public class LockingTransaction
                         TryWriteLock(r);
                         locked.Add(r);
 
-                        if (wasEnsured && r.tvals != null && r.tvals.point > _readPoint)
+                        if (wasEnsured && r.TValsOverPoint(_readPoint))
                             throw RETRY_EX;
 
-                        var refInfo = r.tinfo;
+                        var refInfo = r.TransactionInfo;
                         if (refInfo != null && refInfo != _info && refInfo.Running)
                         {
                             if (!Barge(refInfo))
                                 throw RETRY_EX;
                         }
 
-                        var val = r.tvals?.val;
+                        throw new NotImplementedException();
+                        /*
+                        var val = r.TVal;
                         _vals[r] = val;
 
-                        foreach (var cfn in eVal)
+                        foreach (var cfn in commutes)
                         {
                             var nVal = ((Func<object?, object?>)cfn)(val);
                             _vals[r] = nVal;
                         }
+                        */
                     }
 
                     // Handle sets
@@ -243,23 +248,7 @@ public class LockingTransaction
                     var commitPoint = GetCommitPoint();
                     foreach (var (r, value) in _vals)
                     {
-                        var oldVal = r.tvals?.val;
-                        int hCount = r.HistCount();
-
-                        if (r.tvals == null)
-                            r.tvals = new Ref.TVal(value, commitPoint);
-                        else if ((r.faults > 0) && hCount < r.MaxHistory || hCount < r.MinHistory)
-                        {
-                            r.tvals = new Ref.TVal(value, commitPoint, r.tvals);
-                            r.faults = 0;
-                        }
-                        else
-                        {
-                            r.tvals = r.tvals.next;
-                            r.tvals!.val = value;
-                            r.tvals!.point = commitPoint;
-                        }
-
+                        r.CommitValue(value, commitPoint);
                         // TODO: notify watches
                     }
 
@@ -274,11 +263,11 @@ public class LockingTransaction
             finally
             {
                 foreach (var l in locked)
-                    l.Lock.ExitWriteLock();
+                    l.ExitWriteLock();
                 locked.Clear();
 
                 foreach (var r in _ensures)
-                    r.Lock.ExitReadLock();
+                    r.ExitReadLock();
                 _ensures.Clear();
 
                 Stop(done ? State.COMITTED : State.RETRY);
@@ -300,39 +289,56 @@ public class LockingTransaction
             throw new Exception("Transaction retry limit reached");
         return ret;
     }
+    
+    public static T RunInTransaction<T>(Func<T> action)
+    {
+        var tx = LockingTransaction.Current;
+        T ret;
+        if (tx == null)
+        {
+            tx = new LockingTransaction();
+            transaction.Value = tx;
+            try
+            {
+                ret = tx.Run(action);
+            }
+            finally
+            {
+                transaction.Value = null;
+            }
+        }
+        else
+        {
+            if (tx._info != null)
+            {
+                ret = action();
+            }
+            else
+            {
+                ret = tx.Run(action);
+            }
+        }
 
-    public object? DoGet(Ref r)
+        return ret;
+    }
+
+    public T DoGet<T>(Ref<T> r)
     {
         if (!_info!.Running)
             throw RETRY_EX;
         if (_vals.TryGetValue(r, out var val))
         {
-            return val!;
+            return (T)val!;
         }
 
-        try
-        {
-            r.Lock.EnterReadLock();
-            if (r.tvals == null)
-                throw new InvalidOperationException(r + " is unbound");
-            var ver = r.tvals;
-            do
-            {
-                if (ver.point <= _readPoint)
-                    return ver.val;
-            } while ((ver = ver.prior) != r.tvals);
-        }
-        finally
-        {
-            r.Lock.ExitReadLock();
-        }
-
-        // No previous value exists
+        if (r.TryGetTVal(_readPoint, out var result))
+            return result;
+        
         Interlocked.Increment(ref r.faults);
         throw RETRY_EX;
     }
 
-    public object? DoSet(Ref r, object? val)
+    public object? DoSet(IGenericRef r, object? val)
     {
         if (!_info!.Running)
             throw RETRY_EX;
@@ -344,7 +350,7 @@ public class LockingTransaction
         return val;
     }
 
-    public void DoEnsure(Ref r)
+    public void DoEnsure(IGenericRef r)
     {
         if (!_info!.Running)
             throw RETRY_EX;
@@ -352,18 +358,11 @@ public class LockingTransaction
         if (_ensures.Contains(r))
             return;
 
-        r.Lock.EnterReadLock();
-        if (r.tvals == null && r.tvals!.point > _readPoint)
-        {
-            r.Lock.ExitReadLock();
-            throw RETRY_EX;
-        }
-
-        var refInfo = r.tinfo;
+        var refInfo = r.ThrowIfTValPointOver(_readPoint);
 
         if (refInfo is { Running: true })
         {
-            r.Lock.ExitReadLock();
+            r.ExitReadLock();
             if (refInfo != _info)
                 BlockAndBail(refInfo);
         }
@@ -374,7 +373,14 @@ public class LockingTransaction
 
     }
 
-    public static LockingTransaction Current =>
-        transaction.Value ?? throw new InvalidOperationException("No transaction running");
+    public static LockingTransaction? Current => transaction.Value;
 
+    public static LockingTransaction GetOrException()
+    {
+        var tx = Current;
+        if (tx != null)
+            return tx;
+        throw new InvalidOperationException("No transaction in scope");
+        
+    }
 }

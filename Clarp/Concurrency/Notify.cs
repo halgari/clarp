@@ -2,11 +2,11 @@
 
 public class Notify
 {
-    public Ref Ref { get; set; }
+    public IGenericRef Ref { get; set; }
     public object OldValue { get; set; }
     public object NewValue { get; set; }
 
-    public Notify(Ref r, object oldValue, object newValue)
+    public Notify(IGenericRef r, object oldValue, object newValue)
     {
         Ref = r;
         OldValue = oldValue;
