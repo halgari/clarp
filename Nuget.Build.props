@@ -1,0 +1,35 @@
+﻿<Project>
+    <PropertyGroup>
+        <!-- Overwrites IsPackable from global Directory.Build.props -->
+        <IsPackable>true</IsPackable>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <Authors>Halgari</Authors>
+
+        <PackageReadmeFile>docs/README.md</PackageReadmeFile>
+        <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>
+        <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+
+        <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+
+        <!-- This is the URL to the main project, not the individual package. -->
+        <PackageProjectUrl>https://github.com/halgari/clarp</PackageProjectUrl>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+        <!-- https://github.com/dotnet/sourcelink/tree/main/docs#publishrepositoryurl -->
+        <!-- Source Link will set RepositoryUrl for us in a CI environment -->
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
+
+        <!-- https://github.com/dotnet/sourcelink/tree/main/docs#embeduntrackedsources -->
+        <EmbedUntrackedSources>false</EmbedUntrackedSources>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="$(MSBuildThisFileDirectory)icon.png" Pack="true" PackagePath="assets" />
+        <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="docs" />
+    </ItemGroup>
+</Project>
