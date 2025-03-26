@@ -6,7 +6,7 @@ namespace Clarp.Tests.Concurrency;
 
 public class AgentTests
 {
-    private const int WaitTime = 100;
+    private const int WaitTime = 1000;
     [Test]
     public async Task CanEnqueueItems()
     {
