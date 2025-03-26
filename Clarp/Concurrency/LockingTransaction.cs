@@ -31,6 +31,7 @@ public class LockingTransaction
 
     private Dictionary<IGenericRef, object?> _vals = new();
     private HashSet<IGenericRef> _sets = new();
+    private List<IAction> _actions = new();
     private readonly SortedDictionary<IGenericRef, List<object>> _commutes = new();
     private readonly HashSet<IGenericRef> _ensures = [];
 
@@ -248,8 +249,9 @@ public class LockingTransaction
                     var commitPoint = GetCommitPoint();
                     foreach (var (r, value) in _vals)
                     {
-                        r.CommitValue(value, commitPoint);
-                        // TODO: notify watches
+                        var (oldValue, newValue) = r.CommitValue(value, commitPoint);
+                        if (r.HasWatches)
+                            notify.Add(new Notify(r, oldValue, newValue));
                     }
 
                     done = true;
@@ -275,13 +277,16 @@ public class LockingTransaction
                 {
                     if (done)
                     {
-                        // TODO: notify watches
+                        foreach (var n in notify)
+                            n.Ref.NotifyWatches(n.OldValue, n.NewValue);
+                        foreach (var a in _actions)
+                            a.Enqueue();
                     }
                 }
                 finally
                 {
                     notify.Clear();
-                    // TODO: Actions after commit
+                    _actions.Clear();
                 }
             }
         }

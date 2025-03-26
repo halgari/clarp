@@ -1,4 +1,7 @@
-﻿namespace Clarp.Concurrency;
+﻿using System.Collections.Immutable;
+using Clarp.Abstractions;
+
+namespace Clarp.Concurrency;
 
 internal static class RefGlobals
 {
@@ -23,8 +26,10 @@ public interface IGenericRef : IComparable<IGenericRef>
     bool TValsOverPoint(long readPoint);
     LockingTransaction.Info? TransactionInfo { get; set; }
     object? CurrentTVal { get; }
+    bool HasWatches { get; }
     bool TryEnterWriteLock(int lockWaitMsecs);
-    void CommitValue(object? value, long commitPoint);
+    (object? OldValue, object? NewValue) CommitValue(object? value, long commitPoint);
+    void NotifyWatches(object nOldValue, object nNewValue);
 }
 public class Ref<T> : IGenericRef
 {
@@ -177,14 +182,16 @@ public class Ref<T> : IGenericRef
         }
     }
 
+    public bool HasWatches => false;
+
     public bool TryEnterWriteLock(int lockWaitMsecs)
     {
         return _lock.TryEnterWriteLock(lockWaitMsecs);
     }
 
-    public void CommitValue(object? value, long commitPoint)
+    public (object? OldValue, object? NewValue) CommitValue(object? value, long commitPoint)
     {
-        //var oldVal = tvals?.val;
+        var oldVal = tvals == null ? default(T) : tvals.val;
         var hCount = HistCount();
 
         if (tvals == null)
@@ -200,6 +207,13 @@ public class Ref<T> : IGenericRef
             tvals!.val = (T)value!;
             tvals!.point = commitPoint;
         }
+        
+        return (oldVal, value);
+    }
+
+    public void NotifyWatches(object nOldValue, object nNewValue)
+    {
+        throw new NotImplementedException();
     }
 
     public bool TryGetTVal(long readPoint, out T value)
