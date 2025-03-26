@@ -35,8 +35,8 @@ public class Ref<T> : IGenericRef
 {
     public readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.SupportsRecursion);
 
-    public static int MinHistory { get; set; }
-    public static int MaxHistory { get; set; }
+    public static int MinHistory { get; set; } = 0;
+    public static int MaxHistory { get; set; } = 10;
 
     public int faults;
     
@@ -196,7 +196,7 @@ public class Ref<T> : IGenericRef
 
         if (tvals == null)
             tvals = new TVal((T)value, commitPoint);
-        else if ((faults > 0) && hCount < MaxHistory || hCount < MinHistory)
+        else if ((faults > 0 && hCount < MaxHistory) || hCount < MinHistory)
         {
             tvals = new TVal((T)value, commitPoint, tvals);
             faults = 0;
