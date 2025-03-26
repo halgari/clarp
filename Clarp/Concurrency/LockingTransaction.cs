@@ -4,7 +4,7 @@ namespace Clarp.Concurrency;
 
 public class LockingTransaction
 {
-    public const int RETRY_LIMIT = 4;
+    public const int RETRY_LIMIT = 10000;
     public const int LOCK_WAIT_MSECS = 100;
     public const long BARGE_WAIT_TICKS = 10 * 1000000;
 

@@ -88,7 +88,7 @@ public class Ref<T> : IGenericRef
             return 0;
 
         int count = 0;
-        for (var tval = tvals; tval != tvals; tval = tval!.next)
+        for (var tval = tvals.next; tval != tvals; tval = tval!.next)
             count++;
         return count;
     }
@@ -149,7 +149,7 @@ public class Ref<T> : IGenericRef
     public LockingTransaction.Info? ThrowIfTValPointOver(long readPoint)
     {
         _lock.EnterReadLock();
-        if (tvals == null && tvals!.point > readPoint)
+        if (tvals != null && tvals!.point > readPoint)
         {
             _lock.ExitReadLock();
             throw LockingTransaction.RETRY_EX;

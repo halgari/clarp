@@ -63,7 +63,7 @@ public class RefTests
         }
     }
     
-    public record ForkState(bool Available, int AquiredCount);
+    public record ForkState(bool Available, int AcquiredCount);
     
     /// <summary>
     /// Implementation of the classic dining philosophers problem using STM. The idea
@@ -107,13 +107,15 @@ public class RefTests
                     // First try to acquire both forks
                     var canEat = LockingTransaction.RunInTransaction(() =>
                     {
+                        var leftForkState = forks[leftFork].Value;
+                        var rightForkState = forks[rightFork].Value;
                         // If either fork is not available, return false
-                        if (!forks[leftFork].Value.Available || !forks[rightFork].Value.Available) 
+                        if (!leftForkState.Available || !rightForkState.Available)
                             return false;
                         
                         // Otherwise, acquire both forks, and increment the eat/aquired count
-                        forks[leftFork].Value = new ForkState(false, forks[leftFork].Value.AquiredCount + 1);
-                        forks[rightFork].Value = new ForkState(false, forks[rightFork].Value.AquiredCount + 1);
+                        forks[leftFork].Value = new ForkState(false, leftForkState.AcquiredCount + 1);
+                        forks[rightFork].Value = new ForkState(false, rightForkState.AcquiredCount + 1);
                         philosopherEatCount[philosopherId].Value++;
                         return true;
                     });
@@ -129,7 +131,7 @@ public class RefTests
                     // Now return the forks
                     LockingTransaction.RunInTransaction(() =>
                     {
-                        forks[leftFork].Value = forks[rightFork].Value with { Available = true };
+                        forks[leftFork].Value = forks[leftFork].Value with { Available = true };
                         forks[rightFork].Value = forks[rightFork].Value with { Available = true };
                         return true;
                     });
@@ -144,7 +146,7 @@ public class RefTests
             // Each philosopher should have released their forks
             await Assert.That(forks[i].Value.Available).IsTrue();
             // Each philosopher needs both forks to eat, so the aquired count should be twice the eat count
-            await Assert.That(forks[i].Value.AquiredCount).IsEqualTo(MaxEats * 2);
+            await Assert.That(forks[i].Value.AcquiredCount).IsEqualTo(MaxEats * 2);
             // Each philosopher should have eaten the maximum number of times
             await Assert.That(philosopherEatCount[i].Value).IsEqualTo(MaxEats);
         }
