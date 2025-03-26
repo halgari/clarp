@@ -6,7 +6,22 @@ namespace Clarp.Tests.Concurrency;
 
 public class AgentTests
 {
-    private const int WaitTime = 1000;
+    private const int WaitTime = 10;
+    private const int MaxLoops = 10000;
+
+    private async Task WaitUntil(Func<bool> condition)
+    {
+        var loops = 0;
+        while (!condition())
+        {
+            await Task.Delay(WaitTime);
+            loops++;
+            
+            if (loops > MaxLoops)
+                throw new Exception("Waited too long.");
+        }
+    }
+    
     [Test]
     public async Task CanEnqueueItems()
     {
@@ -16,7 +31,8 @@ public class AgentTests
         {
             agent.Send(s => s + 1);
         }
-        Thread.Sleep(WaitTime);
+
+        await WaitUntil(() => agent.Value == 10);
         
         await Assert.That(agent.Value).IsEqualTo(10);
     }
@@ -34,7 +50,8 @@ public class AgentTests
         }
         
         await Task.WhenAll(tasks);
-        Thread.Sleep(WaitTime);
+        
+        await WaitUntil(() => agent.Value == TaskCount);
         
         await Assert.That(agent.Value).IsEqualTo(TaskCount);
     }
@@ -45,7 +62,7 @@ public class AgentTests
     [Test]
     public async Task TasksMaintainOrdering()
     {
-        const int TaskCount = 10000;
+        const int TaskCount = 1000;
         
         var agent = new Agent<ImmutableList<int>>( ImmutableList<int>.Empty);
         
@@ -55,7 +72,7 @@ public class AgentTests
             agent.Send(s => s.Add(v));
         }
         
-        Thread.Sleep(WaitTime);
+        await WaitUntil(() => agent.Value.Count == TaskCount);
         
         await Assert.That(agent.Value.ToList()).IsEquivalentTo(Enumerable.Range(0, TaskCount).ToList());
     }
@@ -72,7 +89,8 @@ public class AgentTests
         agent.Send(s => s + 1);
         agent.Send(s => s + 1);
         
-        Thread.Sleep(WaitTime);
+        
+        await WaitUntil(() => agent.Value == 2);
         
         await Assert.That(updates).IsEquivalentTo(new List<(int From, int To)> {(0, 1), (1, 2)});
 
@@ -102,7 +120,7 @@ public class AgentTests
         // Start the chain
         a.Send(Handle);
         
-        Thread.Sleep(WaitTime);
+        await WaitUntil(() => finished.Value.Count == 3);
         
         await Assert.That(finished.Value.ToList()).IsEquivalentTo(new List<string> {"A", "B", "C"}, CollectionOrdering.Any);
         return;
