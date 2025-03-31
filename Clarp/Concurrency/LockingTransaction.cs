@@ -4,70 +4,39 @@ namespace Clarp.Concurrency;
 
 public class LockingTransaction
 {
+    public enum State
+    {
+        RUNNING,
+        COMITTING,
+        RETRY,
+        KILLED,
+        COMITTED
+    }
+
     public const int RETRY_LIMIT = 10000;
     public const int LOCK_WAIT_MSECS = 100;
     public const long BARGE_WAIT_TICKS = 10 * 1000000;
 
     internal static RetryEx RETRY_EX = new();
 
-    public enum State : int
-    {
-        RUNNING,
-        COMITTING,
-        RETRY,
-        KILLED,
-        COMITTED,
-    }
-
     private static readonly ThreadLocal<LockingTransaction> transaction = new();
     private static long _lastPoint;
 
-    #region Instance Fields
+    private bool BargeTimeElapsed => Environment.TickCount64 - _startTime > BARGE_WAIT_TICKS;
 
-    Info? _info;
-    private long _readPoint;
-    private long _startPoint;
-    private long _startTime;
+    public static LockingTransaction? Current => transaction.Value;
 
-    private Dictionary<IGenericRef, object?> _vals = new();
-    private HashSet<IGenericRef> _sets = new();
-    private List<IAction> _actions = new();
-    private readonly SortedDictionary<IGenericRef, List<object>> _commutes = new();
-    private readonly HashSet<IGenericRef> _ensures = [];
-
-    #endregion
-
-
-    internal class RetryEx : Exception;
-
-    class AbortException : Exception;
-
-    public class Info
+    private void GetReadPoint()
     {
-        public int _status;
-
-        public State Status => (State)_status;
-
-        public long StartPoint;
-        public readonly CountdownLatch Latch;
-
-        public Info(State status, long startPoint)
-        {
-            _status = (int)status;
-            StartPoint = startPoint;
-            Latch = new CountdownLatch(1);
-        }
-
-        public bool Running => Status is State.RUNNING or State.COMITTING;
+        _readPoint = Interlocked.Increment(ref _lastPoint);
     }
 
-    void GetReadPoint()
-        => _readPoint = Interlocked.Increment(ref _lastPoint);
+    private long GetCommitPoint()
+    {
+        return Interlocked.Increment(ref _lastPoint);
+    }
 
-    long GetCommitPoint()
-        => Interlocked.Increment(ref _lastPoint);
-
-    void Stop(State status)
+    private void Stop(State status)
     {
         if (_info is null)
             return;
@@ -77,13 +46,14 @@ public class LockingTransaction
             _info._status = (byte)status;
             _info.Latch.Signal();
         }
+
         _info = null;
         _vals.Clear();
         _sets.Clear();
         _commutes.Clear();
     }
 
-    void TryWriteLock(IGenericRef r)
+    private void TryWriteLock(IGenericRef r)
     {
         try
         {
@@ -111,21 +81,21 @@ public class LockingTransaction
         throw new AbortException();
     }
 
-    private bool BargeTimeElapsed => (Environment.TickCount64 - _startTime) > BARGE_WAIT_TICKS;
-
     private bool Barge(Info refInfo)
     {
         var barged = false;
         if (BargeTimeElapsed && _startPoint < refInfo.StartPoint)
         {
-            barged = Interlocked.CompareExchange(ref refInfo._status, (int)State.KILLED, (int)State.RUNNING) == (int)State.RUNNING;
+            barged = Interlocked.CompareExchange(ref refInfo._status, (int)State.KILLED, (int)State.RUNNING) ==
+                     (int)State.RUNNING;
             if (barged)
                 refInfo.Latch.Signal();
         }
+
         return barged;
     }
 
-    void Lock(IGenericRef r)
+    private void Lock(IGenericRef r)
     {
         ReleaseIfEnsured(r);
         var unlocked = true;
@@ -141,7 +111,6 @@ public class LockingTransaction
 
             // write lock conflict
             if (refInfo != null && !ReferenceEquals(_info, refInfo) && refInfo.Running)
-            {
                 if (!Barge(refInfo))
                 {
                     r.ExitWriteLock();
@@ -149,10 +118,8 @@ public class LockingTransaction
                     BlockAndBail(refInfo!);
                     return;
                 }
-            }
 
             r.TransactionInfo = _info!;
-            return;
             //return r.tvals?.val;
         }
         finally
@@ -162,7 +129,7 @@ public class LockingTransaction
         }
     }
 
-    object? BlockAndBail(Info refInfo)
+    private object? BlockAndBail(Info refInfo)
     {
         Stop(State.RETRY);
         try
@@ -173,19 +140,19 @@ public class LockingTransaction
         {
             // ignore
         }
+
         throw RETRY_EX;
     }
 
     public T Run<T>(Func<T> action)
     {
-        bool done = false;
+        var done = false;
         T ret = default!;
 
         List<IGenericRef> locked = [];
         List<Notify> notify = [];
 
         for (var retryCount = 0; !done && retryCount < RETRY_LIMIT; retryCount++)
-        {
             try
             {
                 GetReadPoint();
@@ -218,10 +185,8 @@ public class LockingTransaction
 
                         var refInfo = r.TransactionInfo;
                         if (refInfo != null && refInfo != _info && refInfo.Running)
-                        {
                             if (!Barge(refInfo))
                                 throw RETRY_EX;
-                        }
 
                         throw new NotImplementedException();
                         /*
@@ -244,7 +209,6 @@ public class LockingTransaction
                     }
 
                     // TODO: Notifications
-
                     // At this point, all values are calculated and refs can now be written
                     var commitPoint = GetCommitPoint();
                     foreach (var (r, value) in _vals)
@@ -289,15 +253,15 @@ public class LockingTransaction
                     _actions.Clear();
                 }
             }
-        }
+
         if (!done)
             throw new Exception("Transaction retry limit reached");
         return ret;
     }
-    
+
     public static T RunInTransaction<T>(Func<T> action)
     {
-        var tx = LockingTransaction.Current;
+        var tx = Current;
         T ret;
         if (tx == null)
         {
@@ -315,13 +279,9 @@ public class LockingTransaction
         else
         {
             if (tx._info != null)
-            {
                 ret = action();
-            }
             else
-            {
                 ret = tx.Run(action);
-            }
         }
 
         return ret;
@@ -331,14 +291,11 @@ public class LockingTransaction
     {
         if (!_info!.Running)
             throw RETRY_EX;
-        if (_vals.TryGetValue(r, out var val))
-        {
-            return (T)val!;
-        }
+        if (_vals.TryGetValue(r, out var val)) return (T)val!;
 
         if (r.TryGetTVal(_readPoint, out var result))
             return result;
-        
+
         Interlocked.Increment(ref r.faults);
         throw RETRY_EX;
     }
@@ -375,10 +332,7 @@ public class LockingTransaction
         {
             _ensures.Add(r);
         }
-
     }
-
-    public static LockingTransaction? Current => transaction.Value;
 
     public static LockingTransaction GetOrException()
     {
@@ -386,6 +340,44 @@ public class LockingTransaction
         if (tx != null)
             return tx;
         throw new InvalidOperationException("No transaction in scope");
-        
     }
+
+
+    internal class RetryEx : Exception;
+
+    private class AbortException : Exception;
+
+    public class Info
+    {
+        public readonly CountdownLatch Latch;
+        public int _status;
+
+        public long StartPoint;
+
+        public Info(State status, long startPoint)
+        {
+            _status = (int)status;
+            StartPoint = startPoint;
+            Latch = new CountdownLatch(1);
+        }
+
+        public State Status => (State)_status;
+
+        public bool Running => Status is State.RUNNING or State.COMITTING;
+    }
+
+    #region Instance Fields
+
+    private Info? _info;
+    private long _readPoint;
+    private long _startPoint;
+    private long _startTime;
+
+    private readonly Dictionary<IGenericRef, object?> _vals = new();
+    private readonly HashSet<IGenericRef> _sets = new();
+    private readonly List<IAction> _actions = new();
+    private readonly SortedDictionary<IGenericRef, List<object>> _commutes = new();
+    private readonly HashSet<IGenericRef> _ensures = [];
+
+    #endregion
 }

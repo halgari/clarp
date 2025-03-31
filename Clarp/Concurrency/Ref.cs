@@ -1,12 +1,9 @@
-﻿using System.Collections.Immutable;
-using Clarp.Abstractions;
-
-namespace Clarp.Concurrency;
+﻿namespace Clarp.Concurrency;
 
 internal static class RefGlobals
 {
     private static long _nextId;
-    
+
     public static long NextId()
     {
         return Interlocked.Increment(ref _nextId);
@@ -15,32 +12,33 @@ internal static class RefGlobals
 
 public interface IGenericRef : IComparable<IGenericRef>
 {
+    LockingTransaction.Info? TransactionInfo { get; set; }
+    object? CurrentTVal { get; }
+    bool HasWatches { get; }
     void EnterReadLock();
     void ExitReadLock();
-    
+
     void EnterWriteLock();
-    
+
     void ExitWriteLock();
 
     LockingTransaction.Info? ThrowIfTValPointOver(long readPoint);
     bool TValsOverPoint(long readPoint);
-    LockingTransaction.Info? TransactionInfo { get; set; }
-    object? CurrentTVal { get; }
-    bool HasWatches { get; }
     bool TryEnterWriteLock(int lockWaitMsecs);
     (object? OldValue, object? NewValue) CommitValue(object? value, long commitPoint);
     void NotifyWatches(object nOldValue, object nNewValue);
 }
+
 public class Ref<T> : IGenericRef
 {
+    private readonly long _id = RefGlobals.NextId();
     public readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.SupportsRecursion);
 
-    public static int MinHistory { get; set; } = 0;
-    public static int MaxHistory { get; set; } = 10;
-
     public int faults;
-    
-    private readonly long _id = RefGlobals.NextId();
+
+    public LockingTransaction.Info? tinfo;
+
+    public TVal? tvals;
 
     public Ref(T initialValue)
     {
@@ -53,71 +51,9 @@ public class Ref<T> : IGenericRef
         tvals = null;
         faults = 0;
     }
-    
-    /// <summary>
-    /// Container for transaction values
-    /// </summary>
-    public class TVal
-    {
-        public T? val;
-        public long point;
-        public TVal prior;
-        public TVal? next;
 
-        public TVal(T? val, long point, TVal prior)
-        {
-            this.val = val;
-            this.point = point;
-            this.prior = prior;
-            next = prior.next;
-            this.prior.next = this;
-            this.next!.prior = this;
-        }
-
-        public TVal(T? val, long point)
-        {
-            this.val = val;
-            this.point = point;
-            prior = this;
-            next = this;
-        }
-    }
-
-    public TVal? tvals;
-
-    public LockingTransaction.Info? tinfo;
-
-    public int HistCount()
-    {
-        if (tvals == null)
-            return 0;
-
-        int count = 0;
-        for (var tval = tvals.next; tval != tvals; tval = tval!.next)
-            count++;
-        return count;
-    }
-
-    public object? Alter(Func<object?, object?> alterFunc)
-    {
-        var t = LockingTransaction.Current;
-        return t.DoSet(this, alterFunc(t.DoGet(this)));
-    }
-
-    private T GetCurrentValue()
-    {
-        try
-        {
-            _lock.EnterReadLock();
-            if (tvals != null)
-                return (T)tvals.val;
-            throw new InvalidOperationException("Ref is unbound");
-        }
-        finally
-        {
-            _lock.ExitReadLock();
-        }
-    }
+    public static int MinHistory { get; set; } = 0;
+    public static int MaxHistory { get; set; } = 10;
 
     public T Value
     {
@@ -159,6 +95,7 @@ public class Ref<T> : IGenericRef
             _lock.ExitReadLock();
             throw LockingTransaction.RETRY_EX;
         }
+
         return tinfo;
     }
 
@@ -169,13 +106,14 @@ public class Ref<T> : IGenericRef
 
     public LockingTransaction.Info? TransactionInfo
     {
-        get { return tinfo; }
-        set { tinfo = value; }
+        get => tinfo;
+        set => tinfo = value;
     }
 
     public object? CurrentTVal
     {
-        get { 
+        get
+        {
             if (tvals == null)
                 return null;
             return tvals.val;
@@ -191,11 +129,13 @@ public class Ref<T> : IGenericRef
 
     public (object? OldValue, object? NewValue) CommitValue(object? value, long commitPoint)
     {
-        var oldVal = tvals == null ? default(T) : tvals.val;
+        var oldVal = tvals == null ? default : tvals.val;
         var hCount = HistCount();
 
         if (tvals == null)
+        {
             tvals = new TVal((T)value, commitPoint);
+        }
         else if ((faults > 0 && hCount < MaxHistory) || hCount < MinHistory)
         {
             tvals = new TVal((T)value, commitPoint, tvals);
@@ -207,13 +147,50 @@ public class Ref<T> : IGenericRef
             tvals!.val = (T)value!;
             tvals!.point = commitPoint;
         }
-        
+
         return (oldVal, value);
     }
 
     public void NotifyWatches(object nOldValue, object nNewValue)
     {
         throw new NotImplementedException();
+    }
+
+    public int CompareTo(IGenericRef? other)
+    {
+        return other is null ? 1 : _id.CompareTo(((Ref<T>)other)._id);
+    }
+
+    public int HistCount()
+    {
+        if (tvals == null)
+            return 0;
+
+        var count = 0;
+        for (var tval = tvals.next; tval != tvals; tval = tval!.next)
+            count++;
+        return count;
+    }
+
+    public object? Alter(Func<object?, object?> alterFunc)
+    {
+        var t = LockingTransaction.Current;
+        return t.DoSet(this, alterFunc(t.DoGet(this)));
+    }
+
+    private T GetCurrentValue()
+    {
+        try
+        {
+            _lock.EnterReadLock();
+            if (tvals != null)
+                return (T)tvals.val;
+            throw new InvalidOperationException("Ref is unbound");
+        }
+        finally
+        {
+            _lock.ExitReadLock();
+        }
     }
 
     public bool TryGetTVal(long readPoint, out T value)
@@ -237,10 +214,37 @@ public class Ref<T> : IGenericRef
         {
             _lock.ExitReadLock();
         }
+
         value = default!;
         return false;
     }
 
-    public int CompareTo(IGenericRef? other) 
-        => other is null ? 1 : _id.CompareTo(((Ref<T>)other)._id);
+    /// <summary>
+    ///     Container for transaction values
+    /// </summary>
+    public class TVal
+    {
+        public TVal? next;
+        public long point;
+        public TVal prior;
+        public T? val;
+
+        public TVal(T? val, long point, TVal prior)
+        {
+            this.val = val;
+            this.point = point;
+            this.prior = prior;
+            next = prior.next;
+            this.prior.next = this;
+            next!.prior = this;
+        }
+
+        public TVal(T? val, long point)
+        {
+            this.val = val;
+            this.point = point;
+            prior = this;
+            next = this;
+        }
+    }
 }

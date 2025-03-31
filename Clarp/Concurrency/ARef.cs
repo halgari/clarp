@@ -5,12 +5,12 @@ namespace Clarp.Concurrency;
 
 public abstract class ARef<T> : AReference, IRef<T>
 {
+    private IRef<T>.ValidatorFn? _validator;
 
-    private IImmutableDictionary<object, IRef<T>.WatchFn>? _watches = null;
-    private IRef<T>.ValidatorFn? _validator = null;
-    
+    private IImmutableDictionary<object, IRef<T>.WatchFn>? _watches;
+
     public abstract T Value { get; }
-    
+
     public IRef<T>.ValidatorFn? Validator
     {
         get => _validator;
@@ -19,20 +19,6 @@ public abstract class ARef<T> : AReference, IRef<T>
             Validate(value, Value);
             _validator = value;
         }
-    }
-
-    protected void Validate(IRef<T>.ValidatorFn? validator, T value)
-    {
-        if (validator == null)
-            return;
-        
-        if (!validator(value))
-            throw new ArgumentException($"Value {value} is not valid.");
-    }
-    
-    protected void Validate(T value)
-    {
-        Validate(_validator, value);
     }
 
     public IRef<T> AddWatch(object key, IRef<T>.WatchFn watchFn)
@@ -51,10 +37,27 @@ public abstract class ARef<T> : AReference, IRef<T>
         {
             if (_watches == null)
                 return this;
-            
+
             _watches = _watches.Remove(key);
             return this;
         }
+    }
+
+    public IReadOnlyDictionary<object, IRef<T>.WatchFn> Watches =>
+        _watches ?? ImmutableDictionary<object, IRef<T>.WatchFn>.Empty;
+
+    protected void Validate(IRef<T>.ValidatorFn? validator, T value)
+    {
+        if (validator == null)
+            return;
+
+        if (!validator(value))
+            throw new ArgumentException($"Value {value} is not valid.");
+    }
+
+    protected void Validate(T value)
+    {
+        Validate(_validator, value);
     }
 
     public void NotifyWatches(in T oldVal, in T newVal)
@@ -63,12 +66,6 @@ public abstract class ARef<T> : AReference, IRef<T>
             return;
 
         var watches = _watches;
-        foreach (var (key, watch) in watches)
-        {
-            watch.Invoke(key, this, oldVal, newVal);
-        }
-        
+        foreach (var (key, watch) in watches) watch.Invoke(key, this, oldVal, newVal);
     }
-
-    public IReadOnlyDictionary<object, IRef<T>.WatchFn> Watches => _watches ?? ImmutableDictionary<object, IRef<T>.WatchFn>.Empty;
 }
