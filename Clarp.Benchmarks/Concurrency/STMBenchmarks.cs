@@ -23,24 +23,21 @@ public class STMBenchmarks
     [Benchmark]
     public int TwoNestedTransaction()
     {
-        return Runtime.DoSync(() =>
+        return Runtime.DoSync(static r =>
         {
-            var result = _ref.Value;
-            return Runtime.DoSync(() => _ref.Value++);
-        });
+            return Runtime.DoSync(static r => r.Value++, r);
+        }, _ref);
     }
     
     [Benchmark]
     public int ThreeNestedTransaction()
     {
-        return Runtime.DoSync(() =>
+        return Runtime.DoSync(static r =>
         {
-            var result = _ref.Value;
-            return Runtime.DoSync(() =>
+            return Runtime.DoSync(static r =>
             {
-                var result2 = _ref.Value;
-                return Runtime.DoSync(() => _ref.Value++);
-            });
-        });
+                return Runtime.DoSync(static r => r.Value++, r);
+            }, r);
+        }, _ref);
     }
 }
