@@ -79,14 +79,20 @@ public class Agent<T> : ARef<T>
     public Agent<T> Send(UpdateFn fn, IExecutor executor)
     {
         var action = new Action(this, fn, executor);
+
+        var tx = LockingTransaction.Current;
+        if (tx != null)
+        {
+            tx.AddSend(action);
+            return this;
+        }
+
         Enqueue(action);
         return this;
     }
 
-    public Agent<T> Send(UpdateFn fn)
-    {
-        return Send(fn, ThreadPoolExecutorWrapper.Instance);
-    }
+    public Agent<T> Send(UpdateFn fn) 
+        => Send(fn, ThreadPoolExecutorWrapper.Instance);
 
     private void Enqueue(Action action)
     {

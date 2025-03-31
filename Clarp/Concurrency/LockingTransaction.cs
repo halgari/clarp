@@ -436,4 +436,10 @@ public sealed class LockingTransaction : IResettable
         _startTime = 0;
         return true;
     }
+
+    /// <summary>
+    /// Adds the given agent action to the list of actions to be sent after the transaction is committed.
+    /// </summary>
+    internal void AddSend(IAction action) 
+        => _actions.Add(action);
 }

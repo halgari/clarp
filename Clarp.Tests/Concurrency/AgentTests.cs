@@ -9,7 +9,7 @@ public class AgentTests
     private const int WaitTime = 10;
     private const int MaxLoops = 10000;
 
-    private async Task WaitUntil(Func<bool> condition)
+    public static async Task WaitUntil(Func<bool> condition)
     {
         var loops = 0;
         while (!condition())

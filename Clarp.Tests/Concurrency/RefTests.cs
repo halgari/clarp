@@ -190,4 +190,58 @@ public class RefTests
         await Assert.That(transitionsB).IsEquivalentTo(new List<(int, int)> {(0, 1), (1, 2)});
         
     }
+
+    [Test]
+    public async Task CanSendToAgentsInsideTransaction()
+    {
+        var refA = new Ref<int>(10);
+        var agent = new Agent<int>(0);
+
+        var hasMore = true;
+        do
+        {
+            hasMore = DoSync(() =>
+            {
+                var oldA = refA.Value;
+                refA.Value--;
+                agent.Send(s => s + 1);
+                return oldA > 1;
+            });
+        } while (hasMore);
+        
+        await AgentTests.WaitUntil(() => agent.Value == 10);
+        
+        await Assert.That(refA.Value).IsEqualTo(0);
+        await Assert.That(agent.Value).IsEqualTo(10);
+        
+    }
+    
+    [Test]
+    public async Task AgentSendsAreDelayedUntilAfterTheTransactionCommit()
+    {
+        var refA = new Ref<int>(10);
+        var agent = new Agent<int>(0);
+
+        for (var i = 0 ; i < 10; i++) {
+            try
+            {
+                DoSync(() =>
+                {
+                    var oldA = refA.Value;
+                    refA.Value--;
+                    agent.Send(s => s + 1);
+                    throw new Exception("Transaction failed");
+                });
+            }
+            catch (Exception)
+            {
+                // Ignore the exception
+            }
+        }
+        
+        await Assert.That(refA.Value).IsEqualTo(10)
+            .Because("All the transactions should have been rolled back");
+        await Assert.That(agent.Value).IsEqualTo(0)
+            .Because("All the transactions should have been rolled back, and sends should not have been executed");
+    }
 }
