@@ -1,9 +1,12 @@
 ﻿using Clarp.Utils;
+using Microsoft.Extensions.ObjectPool;
 
 namespace Clarp.Concurrency;
 
-public class LockingTransaction
+public sealed class LockingTransaction : IResettable
 {
+    private static ObjectPool<LockingTransaction> _transactionPool =
+        new DefaultObjectPool<LockingTransaction>(new DefaultPooledObjectPolicy<LockingTransaction>(), 16);
     public enum State
     {
         RUNNING,
@@ -144,14 +147,13 @@ public class LockingTransaction
         throw RETRY_EX;
     }
 
-    public T Run<T>(Func<T> action)
+    public TRet Run<TRet, TState>(in Func<TState, TRet> action, in TState state) 
+        where TRet : allows ref struct
+        where TState : allows ref struct
     {
         var done = false;
-        T ret = default!;
-
-        List<ARefBase> locked = [];
-        List<Notify> notify = [];
-
+        TRet ret = default!;
+        
         for (var retryCount = 0; !done && retryCount < RETRY_LIMIT; retryCount++)
             try
             {
@@ -163,7 +165,7 @@ public class LockingTransaction
                 }
 
                 _info = new Info(State.RUNNING, _startPoint);
-                ret = action();
+                ret = action(state);
 
                 // Make sure we're not killed before we start the commit
                 if (Interlocked.CompareExchange(ref _info._status, (int)State.COMITTING, (int)State.RUNNING) ==
@@ -178,7 +180,7 @@ public class LockingTransaction
                         var wasEnsured = _ensures.Contains(r);
                         ReleaseIfEnsured(r);
                         TryWriteLock(r);
-                        locked.Add(r);
+                        _locked.Add(r);
 
                         if (wasEnsured && r.TValsOverPoint(_readPoint))
                             throw RETRY_EX;
@@ -205,7 +207,7 @@ public class LockingTransaction
                     foreach (var r in _sets)
                     {
                         TryWriteLock(r);
-                        locked.Add(r);
+                        _locked.Add(r);
                     }
 
                     // TODO: Notifications
@@ -226,9 +228,9 @@ public class LockingTransaction
             }
             finally
             {
-                foreach (var l in locked)
+                foreach (var l in _locked)
                     l.ExitWriteLock();
-                locked.Clear();
+                _locked.Clear();
 
                 foreach (var r in _ensures)
                     r.ExitReadLock();
@@ -239,16 +241,16 @@ public class LockingTransaction
                 {
                     if (done)
                     {
-                        // TODO: run actions
-                        //foreach (var n in notify)
-                        //    n.Ref.NotifyWatches(n.OldValue, n.NewValue);
+                        foreach (var (reference, oldValue, newValue) in _notifyRefs)
+                            reference.NotifyWatchers(oldValue, newValue);
+                        
                         foreach (var a in _actions)
                             a.Enqueue();
                     }
                 }
                 finally
                 {
-                    notify.Clear();
+                    _notifyRefs.Clear();
                     _actions.Clear();
                 }
             }
@@ -258,29 +260,37 @@ public class LockingTransaction
         return ret;
     }
 
-    public static T RunInTransaction<T>(Func<T> action)
+    /// <summary>
+    /// Queue up a ref to be notified after the transaction is committed.
+    /// </summary>
+    internal void AddPostCommit(ARefBase r, object? oldValue, object? newValue) 
+        => _notifyRefs.Add((r, oldValue, newValue));
+
+    public static TRet RunInTransaction<TRet, TState>(in Func<TState, TRet> action, in TState state) 
+        where TState : allows ref struct
     {
         var tx = Current;
-        T ret;
+        TRet ret;
         if (tx == null)
         {
-            tx = new LockingTransaction();
+            tx = _transactionPool.Get();
             transaction.Value = tx;
             try
             {
-                ret = tx.Run(action);
+                ret = tx.Run(action, state);
             }
             finally
             {
-                transaction.Value = null;
+                transaction.Value = null!;
+                _transactionPool.Return(tx);
             }
         }
         else
         {
             if (tx._info != null)
-                ret = action();
+                ret = action(state);
             else
-                ret = tx.Run(action);
+                ret = tx.Run(action, state);
         }
 
         return ret;
@@ -372,11 +382,58 @@ public class LockingTransaction
     private long _startPoint;
     private long _startTime;
 
+    /// <summary>
+    /// The local, in-transaction values for the references. This is a map of the reference to the current value.
+    /// </summary>
     private readonly Dictionary<ARefBase, object?> _vals = new();
+    
+    /// <summary>
+    /// A set of references that are being set in this transaction, these are the known "writes" in the transaction.
+    /// </summary>
     private readonly HashSet<ARefBase> _sets = new();
+    
+    /// <summary>
+    /// Pending actions to be sent to agents after the transaction is committed.
+    /// </summary>
     private readonly List<IAction> _actions = new();
+    
+    /// <summary>
+    /// Commutes that are pending in this transaction. Commutes are functions that are executed on the value of a reference
+    /// that do not depend on the value of other references. Adding a value to a set, or incrementing a counter may be an
+    /// example of a commute.
+    /// </summary>
     private readonly SortedDictionary<ARefBase, List<object>> _commutes = new();
+    
+    /// <summary>
+    /// References that are being read (ensured) in this transaction. These are the known "reads" in the transaction.
+    /// </summary>
     private readonly HashSet<ARefBase> _ensures = [];
+    
+    /// <summary>
+    /// Currently locked references.
+    /// </summary>
+    private readonly List<ARefBase> _locked = [];
+    
+    /// <summary>
+    /// Post-transaction actions to execute. These are only executed if the transaction is successful.
+    /// </summary>
+    private readonly List<(ARefBase Notify, object? oldValue, object? newValue)> _notifyRefs = [];
 
     #endregion
+
+    public bool TryReset()
+    {
+        _vals.Clear();
+        _sets.Clear();
+        _commutes.Clear();
+        _ensures.Clear();
+        _actions.Clear();
+        _notifyRefs.Clear();
+        _locked.Clear();
+        _info = null;
+        _readPoint = 0;
+        _startPoint = 0;
+        _startTime = 0;
+        return true;
+    }
 }

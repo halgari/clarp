@@ -1,4 +1,8 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Collections.Immutable;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+using Clarp.Abstractions;
+using Clarp.Utils;
 
 namespace Clarp.Concurrency;
 
@@ -113,13 +117,16 @@ public abstract class ARefBase : IComparable<ARefBase>
             count++;
         return count;
     }
+    
+    internal abstract void NotifyWatchers(object? oldValue, object? newValue);
 }
 
-public class Ref<T> : ARefBase
+public class Ref<T> : ARefBase, IRef<T>
 {
-    public int faults;
-
-
+    internal int faults;
+    private ImmutableDictionary<object, IRef<T>.WatchFn> _watchers =
+        ImmutableDictionary<object, IRef<T>.WatchFn>.Empty;
+    
     public Ref(T initialValue)
     {
         TVals = new TVal(initialValue, 0);
@@ -166,7 +173,19 @@ public class Ref<T> : ARefBase
             ((TVal)TVals!).Value = (T)value!;
             TVals!.ReadPoint = commitPoint;
         }
-        // TODO: NotifyWatches(oldVal, value);
+
+        tx.AddPostCommit(this, oldVal, value);
+    }
+
+    internal override void NotifyWatchers(object? oldValue, object? newValue)
+    {
+        if (oldValue == newValue)
+            return;
+
+        foreach (var (key, watcher) in _watchers)
+        {
+            watcher(key, this, (T)oldValue, (T)newValue);
+        }
     }
 
     public object? Alter(Func<object?, object?> alterFunc)
@@ -241,4 +260,23 @@ public class Ref<T> : ARefBase
             Next = this;
         }
     }
+    
+    public IRef<T>.ValidatorFn? Validator { get; set; }
+    public IRef<T> AddWatch(object key, IRef<T>.WatchFn watchFn)
+    {
+        do
+        {
+            var oldWatches = _watchers;
+            var newWatches = oldWatches.Add(key, watchFn);
+            if (Atomic.CompareAndSet(ref _watchers, oldWatches, newWatches))
+                return this;
+        } while (true);
+    }
+
+    public IRef<T> RemoveWatch(object key)
+    {
+        throw new NotImplementedException();
+    }
+
+    public IReadOnlyDictionary<object, IRef<T>.WatchFn> Watches { get; }
 }

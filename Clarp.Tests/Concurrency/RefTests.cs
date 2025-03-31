@@ -1,4 +1,5 @@
 ﻿using Clarp.Concurrency;
+using static Clarp.Runtime;
 
 namespace Clarp.Tests.Concurrency;
 
@@ -10,7 +11,7 @@ public class RefTests
         var refA = new Ref<int>();
         var refB = new Ref<int>();
 
-        var txResult = LockingTransaction.RunInTransaction(() =>
+        var txResult = DoSync(() =>
         {
             refA.Value = 1;
             refB.Value = 2;
@@ -48,7 +49,7 @@ public class RefTests
         {
             while (true)
             {
-                var done = LockingTransaction.RunInTransaction(() =>
+                var done = DoSync(() =>
                 {
                     if (refA.Value == 0)
                         return true;
@@ -105,7 +106,7 @@ public class RefTests
                 while (eats < MaxEats)
                 {
                     // First try to acquire both forks
-                    var canEat = LockingTransaction.RunInTransaction(() =>
+                    var canEat = DoSync(() =>
                     {
                         var leftForkState = forks[leftFork].Value;
                         var rightForkState = forks[rightFork].Value;
@@ -129,7 +130,7 @@ public class RefTests
                     Thread.Sleep(EatTimeMs);
                     
                     // Now return the forks
-                    LockingTransaction.RunInTransaction(() =>
+                    DoSync(() =>
                     {
                         forks[leftFork].Value = forks[leftFork].Value with { Available = true };
                         forks[rightFork].Value = forks[rightFork].Value with { Available = true };
@@ -150,5 +151,43 @@ public class RefTests
             // Each philosopher should have eaten the maximum number of times
             await Assert.That(philosopherEatCount[i].Value).IsEqualTo(MaxEats);
         }
+    }
+
+    [Test]
+    public async Task CanWatchRefs()
+    {
+        var refA = new Ref<int>(10);
+        var refB = new Ref<int>(0);
+        
+        var transitionsA = new List<(int oldValue, int newValue)>();
+        refA.AddWatch("a", (k, r, oldValue, newValue) =>
+        {
+            transitionsA.Add((oldValue, newValue));
+        });
+        
+        var transitionsB = new List<(int oldValue, int newValue)>();
+        refB.AddWatch("b", (k, r, oldValue, newValue) =>
+        {
+            transitionsB.Add((oldValue, newValue));
+        });
+
+        DoSync(() =>
+        {
+            refA.Value--;
+            refB.Value++;
+        });
+
+        DoSync(() =>
+        {
+            refA.Value--;
+            refB.Value++;
+        });
+        
+        await Assert.That(refA.Value).IsEqualTo(8);
+        await Assert.That(refB.Value).IsEqualTo(2);
+        
+        await Assert.That(transitionsA).IsEquivalentTo(new List<(int, int)> {(10, 9), (9, 8)});
+        await Assert.That(transitionsB).IsEquivalentTo(new List<(int, int)> {(0, 1), (1, 2)});
+        
     }
 }
