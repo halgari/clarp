@@ -1,4 +1,6 @@
-﻿namespace Clarp.Concurrency;
+﻿using System.Runtime.CompilerServices;
+
+namespace Clarp.Concurrency;
 
 internal static class RefGlobals
 {
@@ -10,45 +12,123 @@ internal static class RefGlobals
     }
 }
 
-public interface IGenericRef : IComparable<IGenericRef>
+public abstract class ARefBase : IComparable<ARefBase>
 {
-    LockingTransaction.Info? TransactionInfo { get; set; }
+    /// <summary>
+    /// A unique used to resolve contentions between locks. When all the refs in a transaction need to be locked at once
+    /// they can be locked in order of their ID, in order to avoid deadlocks.
+    /// </summary>
+    private readonly long _id = RefGlobals.NextId();
+    
+    protected readonly ReaderWriterLockSlim Lock = new();
+    internal LockingTransaction.Info? TransactionInfo = null;
+
+    /// <summary>
+    /// The transaction values for this reference. This is a circular linked list of slots, each with a read point.
+    /// that specifies the point at which the value was valid.
+    /// </summary>
+    internal ATVal? TVals = null;
+
     object? CurrentTVal { get; }
     bool HasWatches { get; }
-    void EnterReadLock();
-    void ExitReadLock();
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    internal void EnterReadLock() => Lock.EnterReadLock();
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    internal void ExitReadLock() => Lock.ExitReadLock();
 
-    void EnterWriteLock();
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    internal void EnterWriteLock() => Lock.EnterWriteLock();
 
-    void ExitWriteLock();
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    internal void ExitWriteLock() => Lock.ExitWriteLock();
+    
+    /// <summary>
+    /// Try to enter the write lock within the given time limit.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    internal bool TryEnterWriteLock(int lockWaitMsecs) => Lock.TryEnterWriteLock(lockWaitMsecs);
 
-    LockingTransaction.Info? ThrowIfTValPointOver(long readPoint);
-    bool TValsOverPoint(long readPoint);
-    bool TryEnterWriteLock(int lockWaitMsecs);
-    (object? OldValue, object? NewValue) CommitValue(object? value, long commitPoint);
-    void NotifyWatches(object nOldValue, object nNewValue);
+
+    public LockingTransaction.Info? ThrowIfTValPointOver(long readPoint)
+    {
+        EnterReadLock();
+        if (TVals != null && TVals!.ReadPoint > readPoint)
+        {
+            ExitReadLock();
+            throw LockingTransaction.RETRY_EX;
+        }
+        return TransactionInfo;
+    }
+
+    internal abstract class ATVal
+    {
+        /// <summary>
+        /// A reference to the next transaction value in the list, if any.
+        /// </summary>
+        public ATVal? Next;
+        
+        /// <summary>
+        /// The read point of the transaction value.
+        /// </summary>
+        public long ReadPoint;
+        
+        /// <summary>
+        /// A reference to the previous transaction value in the list
+        /// </summary>
+        public ATVal Prior;
+    }
+    
+    /// <summary>
+    /// Returns true, if the current TVals read point is greater than the given read point.
+    /// </summary>
+    public bool TValsOverPoint(long readPoint)
+    {
+        return TVals != null && TVals.ReadPoint > readPoint;
+    }
+    
+    /// <summary>
+    /// Commits the value to the reference. This is called by the transaction when it is ready to commit and all the
+    /// associated locks are aquired.
+    /// </summary>
+    internal abstract void CommitValue(LockingTransaction tx, object? value, long commitPoint);
+
+    /// <summary>
+    /// Compares this reference to another reference based on their IDs. This is used to resolve contention between the locks
+    /// in both refs.
+    /// </summary>
+    public int CompareTo(ARefBase? other)
+    {
+        return other == null ? 1 : _id.CompareTo(other._id);
+    }
+
+    protected int HistCount()
+    {
+        if (TVals == null)
+            return 0;
+
+        var count = 0;
+        for (var tval = TVals.Next; tval != TVals; tval = tval!.Next)
+            count++;
+        return count;
+    }
 }
 
-public class Ref<T> : IGenericRef
+public class Ref<T> : ARefBase
 {
-    private readonly long _id = RefGlobals.NextId();
-    public readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.SupportsRecursion);
-
     public int faults;
 
-    public LockingTransaction.Info? tinfo;
-
-    public TVal? tvals;
 
     public Ref(T initialValue)
     {
-        tvals = new TVal(initialValue, 0);
+        TVals = new TVal(initialValue, 0);
         faults = 0;
     }
 
     public Ref()
     {
-        tvals = null;
+        TVals = null;
         faults = 0;
     }
 
@@ -67,109 +147,26 @@ public class Ref<T> : IGenericRef
         set => LockingTransaction.GetOrException().DoSet(this, value);
     }
 
-    public void EnterReadLock()
+    internal override void CommitValue(LockingTransaction tx, object? value, long commitPoint)
     {
-        _lock.EnterReadLock();
-    }
-
-    public void ExitReadLock()
-    {
-        _lock.ExitReadLock();
-    }
-
-    public void EnterWriteLock()
-    {
-        _lock.EnterWriteLock();
-    }
-
-    public void ExitWriteLock()
-    {
-        _lock.ExitWriteLock();
-    }
-
-    public LockingTransaction.Info? ThrowIfTValPointOver(long readPoint)
-    {
-        _lock.EnterReadLock();
-        if (tvals != null && tvals!.point > readPoint)
-        {
-            _lock.ExitReadLock();
-            throw LockingTransaction.RETRY_EX;
-        }
-
-        return tinfo;
-    }
-
-    public bool TValsOverPoint(long readPoint)
-    {
-        return tvals != null && tvals.point > readPoint;
-    }
-
-    public LockingTransaction.Info? TransactionInfo
-    {
-        get => tinfo;
-        set => tinfo = value;
-    }
-
-    public object? CurrentTVal
-    {
-        get
-        {
-            if (tvals == null)
-                return null;
-            return tvals.val;
-        }
-    }
-
-    public bool HasWatches => false;
-
-    public bool TryEnterWriteLock(int lockWaitMsecs)
-    {
-        return _lock.TryEnterWriteLock(lockWaitMsecs);
-    }
-
-    public (object? OldValue, object? NewValue) CommitValue(object? value, long commitPoint)
-    {
-        var oldVal = tvals == null ? default : tvals.val;
+        var oldVal = TVals == null ? default : ((TVal)TVals).Value;
         var hCount = HistCount();
-
-        if (tvals == null)
+        if (TVals == null)
         {
-            tvals = new TVal((T)value, commitPoint);
+            TVals = new TVal((T)value!, commitPoint);
         }
         else if ((faults > 0 && hCount < MaxHistory) || hCount < MinHistory)
         {
-            tvals = new TVal((T)value, commitPoint, tvals);
+            TVals = new TVal((T)value!, commitPoint, (TVal)TVals);
             faults = 0;
         }
         else
         {
-            tvals = tvals.next;
-            tvals!.val = (T)value!;
-            tvals!.point = commitPoint;
+            TVals = TVals.Next;
+            ((TVal)TVals!).Value = (T)value!;
+            TVals!.ReadPoint = commitPoint;
         }
-
-        return (oldVal, value);
-    }
-
-    public void NotifyWatches(object nOldValue, object nNewValue)
-    {
-        throw new NotImplementedException();
-    }
-
-    public int CompareTo(IGenericRef? other)
-    {
-        return other is null ? 1 : _id.CompareTo(((Ref<T>)other)._id);
-    }
-
-    public int HistCount()
-    {
-        if (tvals == null)
-            return 0;
-
-        var count = 0;
-        for (var tval = tvals.next; tval != tvals; tval = tval!.next)
-            count++;
-        return count;
+        // TODO: NotifyWatches(oldVal, value);
     }
 
     public object? Alter(Func<object?, object?> alterFunc)
@@ -182,14 +179,14 @@ public class Ref<T> : IGenericRef
     {
         try
         {
-            _lock.EnterReadLock();
-            if (tvals != null)
-                return (T)tvals.val;
+            Lock.EnterReadLock();
+            if (TVals != null)
+                return ((TVal)TVals).Value!;
             throw new InvalidOperationException("Ref is unbound");
         }
         finally
         {
-            _lock.ExitReadLock();
+            Lock.ExitReadLock();
         }
     }
 
@@ -197,22 +194,22 @@ public class Ref<T> : IGenericRef
     {
         try
         {
-            _lock.EnterReadLock();
-            var ver = tvals;
+            Lock.EnterReadLock();
+            var ver = TVals;
             if (ver == null)
                 throw new InvalidOperationException(this + " is unbound");
             do
             {
-                if (ver.point <= readPoint)
+                if (ver.ReadPoint <= readPoint)
                 {
-                    value = ver.val!;
+                    value = ((TVal)ver).Value!;
                     return true;
                 }
-            } while ((ver = ver.prior) != tvals);
+            } while ((ver = ver.Prior) != TVals);
         }
         finally
         {
-            _lock.ExitReadLock();
+            Lock.ExitReadLock();
         }
 
         value = default!;
@@ -222,29 +219,26 @@ public class Ref<T> : IGenericRef
     /// <summary>
     ///     Container for transaction values
     /// </summary>
-    public class TVal
+    internal class TVal : ATVal
     {
-        public TVal? next;
-        public long point;
-        public TVal prior;
-        public T? val;
+        public T? Value;
 
-        public TVal(T? val, long point, TVal prior)
+        public TVal(T? val, long readPoint, TVal prior)
         {
-            this.val = val;
-            this.point = point;
-            this.prior = prior;
-            next = prior.next;
-            this.prior.next = this;
-            next!.prior = this;
+            this.Value = val;
+            this.ReadPoint = readPoint;
+            this.Prior = prior;
+            Next = prior.Next;
+            this.Prior.Next = this;
+            Next!.Prior = this;
         }
 
         public TVal(T? val, long point)
         {
-            this.val = val;
-            this.point = point;
-            prior = this;
-            next = this;
+            this.Value = val;
+            this.ReadPoint = point;
+            Prior = this;
+            Next = this;
         }
     }
 }

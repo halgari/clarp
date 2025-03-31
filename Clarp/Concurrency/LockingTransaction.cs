@@ -53,7 +53,7 @@ public class LockingTransaction
         _commutes.Clear();
     }
 
-    private void TryWriteLock(IGenericRef r)
+    private void TryWriteLock(ARefBase r)
     {
         try
         {
@@ -66,7 +66,7 @@ public class LockingTransaction
         }
     }
 
-    private void ReleaseIfEnsured(IGenericRef r)
+    private void ReleaseIfEnsured(ARefBase r)
     {
         if (!_ensures.Contains(r))
             return;
@@ -95,7 +95,7 @@ public class LockingTransaction
         return barged;
     }
 
-    private void Lock(IGenericRef r)
+    private void Lock(ARefBase r)
     {
         ReleaseIfEnsured(r);
         var unlocked = true;
@@ -149,7 +149,7 @@ public class LockingTransaction
         var done = false;
         T ret = default!;
 
-        List<IGenericRef> locked = [];
+        List<ARefBase> locked = [];
         List<Notify> notify = [];
 
         for (var retryCount = 0; !done && retryCount < RETRY_LIMIT; retryCount++)
@@ -213,9 +213,7 @@ public class LockingTransaction
                     var commitPoint = GetCommitPoint();
                     foreach (var (r, value) in _vals)
                     {
-                        var (oldValue, newValue) = r.CommitValue(value, commitPoint);
-                        if (r.HasWatches)
-                            notify.Add(new Notify(r, oldValue, newValue));
+                        r.CommitValue(this, value, commitPoint);
                     }
 
                     done = true;
@@ -241,8 +239,9 @@ public class LockingTransaction
                 {
                     if (done)
                     {
-                        foreach (var n in notify)
-                            n.Ref.NotifyWatches(n.OldValue, n.NewValue);
+                        // TODO: run actions
+                        //foreach (var n in notify)
+                        //    n.Ref.NotifyWatches(n.OldValue, n.NewValue);
                         foreach (var a in _actions)
                             a.Enqueue();
                     }
@@ -300,7 +299,7 @@ public class LockingTransaction
         throw RETRY_EX;
     }
 
-    public object? DoSet(IGenericRef r, object? val)
+    public object? DoSet(ARefBase r, object? val)
     {
         if (!_info!.Running)
             throw RETRY_EX;
@@ -312,7 +311,7 @@ public class LockingTransaction
         return val;
     }
 
-    public void DoEnsure(IGenericRef r)
+    public void DoEnsure(ARefBase r)
     {
         if (!_info!.Running)
             throw RETRY_EX;
@@ -373,11 +372,11 @@ public class LockingTransaction
     private long _startPoint;
     private long _startTime;
 
-    private readonly Dictionary<IGenericRef, object?> _vals = new();
-    private readonly HashSet<IGenericRef> _sets = new();
+    private readonly Dictionary<ARefBase, object?> _vals = new();
+    private readonly HashSet<ARefBase> _sets = new();
     private readonly List<IAction> _actions = new();
-    private readonly SortedDictionary<IGenericRef, List<object>> _commutes = new();
-    private readonly HashSet<IGenericRef> _ensures = [];
+    private readonly SortedDictionary<ARefBase, List<object>> _commutes = new();
+    private readonly HashSet<ARefBase> _ensures = [];
 
     #endregion
 }
